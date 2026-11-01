@@ -6,7 +6,7 @@ This file explains every function in `src/rb1101/rb1101/wall_following.py`, in t
 - [STRAFE mode](mode_strafe.md): never rotate; slide sideways or forward instead
 - [ARC mode](mode_arc.md): drive quarter-circle arcs around corners
 
-The algorithms (when to leave the wall) and the turn limit are covered in [algorithms.md](algorithms.md).
+The algorithms (when to leave the wall) and the turn limit are covered in [algorithms.md](algorithms.md). Real-robot tuning and troubleshooting is in [irl_troubleshooting.md](irl_troubleshooting.md).
 
 `wall_following.sh` just sources the workspace and runs this node:
 

@@ -18,14 +18,14 @@ is_simulation = True
 #   "ROTATE" - turn the robot body 90deg at corners
 #   "STRAFE" - never rotate; slide sideways/forward and change travel direction at corners instead
 #   "ARC"    - drive quarter-circle arcs around corners (radius = right_wall_buffer_distance)
-movement_mode = "ARC"
+movement_mode = "STRAFE"
 assert movement_mode in ("ROTATE", "STRAFE", "ARC"), f"Unknown movement_mode: {movement_mode}"
 
 # Algorithm (when to leave the wall), works with any movement_mode:
 #   "PLAIN"   - always follow the right wall
 #   "HEADING" - leave the wall (don't turn right at an outside corner) whenever facing the initial heading (turn sum mod 4 == 0)
 #   "PLEDGE"  - leave the wall only when the cumulative turn sum is exactly 0 (left = +1, right = -1)
-algorithm = "PLAIN"
+algorithm = "PLEDGE"
 assert algorithm in ("PLAIN", "HEADING", "PLEDGE"), f"Unknown algorithm: {algorithm}"
 
 # Stop for good after this many 90deg turns (every left or right corner counts as 1). None = no limit.
