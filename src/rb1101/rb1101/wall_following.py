@@ -65,6 +65,8 @@ def ransac(points,maxIter,threshold,d):
     bestC = None
     bestInliers = list()
     bestOutliers = list()
+    if len(points) < 2:
+        return bestLine, bestB, bestC, bestInliers, bestOutliers # Need at least 2 points to define a line
     random.seed()
     while i < maxIter:
         i = i+1
@@ -89,7 +91,7 @@ def ransac(points,maxIter,threshold,d):
                 outliers.append(A)
 
         if len(inliers) >= d:
-            bestLine = np.polyfit(inliers[0], inliers[1], 1)
+            bestLine = (B, C) # Line is defined by the two sampled points
             bestB = B
             bestC = C
             bestInliers = inliers
@@ -146,7 +148,9 @@ class WallFollowingNode(Node):
             ranges = self.last_scan
         scan_x = ranges[start_idx:stop_idx] * np.cos(np.deg2rad(np.arange(start_idx,stop_idx)))
         scan_y = ranges[start_idx:stop_idx] * np.sin(np.deg2rad(np.arange(start_idx,stop_idx)))
-        valid_indices = np.logical_and(scan_x < 0.3, scan_y < 0.3)
+        scan_ranges = ranges[start_idx:stop_idx]
+        valid_indices = np.isfinite(scan_x) & np.isfinite(scan_y) & (scan_ranges > 0) # Drop inf/nan/zero (no-return) readings
+        valid_indices &= np.logical_and(scan_x < 0.3, scan_y < 0.3)
         points2fit = np.dstack((scan_x[valid_indices], scan_y[valid_indices]))[0]
 
         ransacLineParams = [] # contains list of pair of points that identify each line
@@ -156,10 +160,11 @@ class WallFollowingNode(Node):
             if line is None:
                 break
 
-            angle = np.rad2deg(np.arctan(C[1]-B[1])/(B[0]-C[0]))
-            angle = angle%360
-            if angle > 180: angle -= 360
-            elif angle < -180: angle += 360
+            # Angle of the wall relative to the robot's heading, in [-90, 90).
+            # Positive = robot is turned left of the wall (so correct by turning right).
+            # A line has no direction, so wrap modulo 180 deg.
+            angle = -np.rad2deg(np.arctan2(C[1]-B[1], C[0]-B[0]))
+            angle = (angle + 90) % 180 - 90
 
             ransacLineParams.append({
                 "p1": B,
@@ -171,20 +176,21 @@ class WallFollowingNode(Node):
             points2fit = outliers
         if len(ransacLineParams) == 0:
             decreasedInliers = nInliers - self.get_parameter('ransac.inliers_decrease_factor').value
-            self.get_logger().debug(f'Decreased inliers to: {decreasedInliers}')
-            self.fitRansacLines(decreasedInliers)
+            if decreasedInliers > 0:
+                self.get_logger().debug(f'Decreased inliers to: {decreasedInliers}')
+                return self.fitRansacLines(decreasedInliers, start_idx, stop_idx)
 
         return ransacLineParams
 
 
     def angle_right(self):
-        '''Return the angle (in degrees) relative to the right side wall most parallel to the robot. If no wallS detected to the right, return False'''
+        '''Return the angle (in degrees) relative to the right side wall most parallel to the robot. If no walls detected to the right, return None'''
         if len(self.ransacLineParams) > 0:
             angles = list(map(lambda p: p["angle"], self.ransacLineParams)) 
             smallest_angle_idx = np.argmin(np.abs(angles))
             return angles[smallest_angle_idx]
         else:
-            return False # No line fitted
+            return None # No line fitted
 
 
     def wall_scan(self, obstacle_threshold:int=5):
@@ -314,23 +320,23 @@ class WallFollowingNode(Node):
         wall_array = self.wall_scan()
         self.get_logger().debug(wall_array)
 
-        # If angle wrt right wall exceeds threshold, 
+        # If angle wrt right wall exceeds threshold, rotate in place to re-align before moving
+        turn_offset = 0.0 # No heading correction unless a usable right wall is found
         if angle is not None:
-            turn_offset = -np.deg2rad(angle) * self.get_parameter('turn_correction_factor').value
-            if 60 >= abs(angle):
-                if abs(angle) > self.get_parameter('angle_tolerance').value:
-                    self.move_2D(0,0,turn_offset)
-                    return 
-            else: # There shouldn't be a caase where right wall is detected but angle is above 90deg
-                self.front_right_lines = self.fitRansacLines(self.get_parameter('ransac.start_inliers').value, 270, 440) # Try ransac again with larger scan radius
+            if abs(angle) > 60: # Unlikely to be the right wall; try ransac again with larger scan radius
+                self.front_right_lines = self.fitRansacLines(self.get_parameter('ransac.start_inliers').value, 270, 440)
                 self.ransacLineParams = self.front_right_lines + self.back_right_lines
                 angle = self.angle_right()
-                if 60 >= abs(angle):
-                    if abs(angle) > self.get_parameter('angle_tolerance').value:
-                        self.move_2D(0,0,turn_offset)
-                        return     
-                else:
-                    self.move_2D(0.1) # Move slowly to get closer to wall
+
+            if angle is not None and abs(angle) <= 60:
+                turn_offset = -np.deg2rad(angle) * self.get_parameter('turn_correction_factor').value
+                if abs(angle) > self.get_parameter('angle_tolerance').value:
+                    self.move_2D(0,0,turn_offset)
+                    return
+            elif not wall_array[0]:
+                self.move_2D(0.1) # Move slowly to get closer to wall
+                return
+            # Otherwise there's a wall in front: fall through so the robot turns left instead of creeping into it
 
         ###### INSERT CODE HERE ######
         if wall_array[0]: # Wall in-front
